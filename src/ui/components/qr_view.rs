@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{Block, Borders, BorderType, Paragraph, Widget},
 };
 
 use super::super::Theme;
@@ -110,6 +110,7 @@ impl<'a> Widget for QRView<'a> {
             .block(Block::default()
                 .borders(Borders::ALL)
                 .title(" Scan this code ")
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(self.theme.border)));
         qr.render(chunks[1], buf);
         

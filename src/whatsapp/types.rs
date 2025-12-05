@@ -21,6 +21,10 @@ pub enum WhatsAppEvent {
     
     #[serde(rename = "disconnected")]
     Disconnected,
+
+    // Internal events
+    #[serde(skip)]
+    ChatsLoaded(Vec<Chat>),
 }
 
 /// WhatsApp chat representation
