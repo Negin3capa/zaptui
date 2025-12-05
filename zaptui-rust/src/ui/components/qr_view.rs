@@ -122,6 +122,13 @@ impl<'a> Widget for QRView<'a> {
             ]),
             Line::from(""),
             Line::from(vec![
+                Span::styled("💡 ", Style::default().fg(self.theme.highlight)),
+                Span::styled("Press ", Style::default()),
+                Span::styled("Ctrl+C", Style::default().add_modifier(Modifier::BOLD).fg(self.theme.primary)),
+                Span::styled(" to quit", Style::default()),
+            ]),
+            Line::from(""),
+            Line::from(vec![
                 Span::styled("Status: ", Style::default().add_modifier(Modifier::BOLD)),
                 Span::styled(self.status, Style::default().fg(self.theme.system)),
             ]),

@@ -80,6 +80,7 @@ impl App {
             
             WhatsAppEvent::Authenticated => {
                 log::info!("Authenticated");
+                self.qr_code = None;  // Clear QR code immediately
                 self.status_message = "Authenticated! Loading chats...".to_string();
             }
             

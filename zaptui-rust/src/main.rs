@@ -9,7 +9,7 @@ use ratatui::{
     backend::CrosstermBackend,
     Terminal,
 };
-use std::io;
+use std::{io, path::PathBuf};
 use tokio::sync::mpsc;
 
 mod config;
@@ -68,9 +68,47 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: 
     // Create channels for WhatsApp events
     let (event_tx, mut event_rx) = mpsc::channel::<WhatsAppEvent>(100);
 
-    // Connect to WhatsApp service
+    // Track service process so we can kill it on exit
+    let mut service_process: Option<std::process::Child> = None;
+
+    // Try to connect to WhatsApp service, start it if needed
     log::info!("Connecting to WhatsApp service at {}", config.whatsapp.service_url);
-    let whatsapp_client = WhatsAppClient::connect(&config.whatsapp.service_url, event_tx).await?;
+    let whatsapp_client = match WhatsAppClient::connect(&config.whatsapp.service_url, event_tx.clone()).await {
+        Ok(client) => {
+            log::info!("Connected to existing WhatsApp service");
+            client
+        }
+        Err(_) => {
+            log::info!("WhatsApp service not running, starting it...");
+
+            // Use service path from config
+            let service_path = PathBuf::from(&config.whatsapp.service_path);
+
+            if !service_path.exists() {
+                return Err(anyhow::anyhow!(
+                    "WhatsApp service not found at {}. Please update the service_path in your config at ~/.config/zaptui/config.toml",
+                    service_path.display()
+                ));
+            }
+
+            log::info!("Starting WhatsApp service from {}", service_path.display());
+            let child = std::process::Command::new("node")
+                .arg(&service_path)
+                .spawn()
+                .map_err(|e| anyhow::anyhow!("Failed to start WhatsApp service: {}", e))?;
+
+            // Store the process handle so we can kill it later
+            service_process = Some(child);
+
+            // Wait for service to start (give it more time)
+            log::info!("Waiting for WhatsApp service to start...");
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+            // Try connecting again
+            WhatsAppClient::connect(&config.whatsapp.service_url, event_tx).await
+                .map_err(|e| anyhow::anyhow!("Failed to connect to WhatsApp service after starting it: {}", e))?
+        }
+    };
     
     // Create app state
     let mut app = App::new(config.clone(), whatsapp_client);
@@ -100,13 +138,25 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: 
                             if key.code == KeyCode::Char('c') 
                                 && key.modifiers.contains(event::KeyModifiers::CONTROL) {
                                 log::info!("User requested quit via Ctrl+C");
+                                // Kill service if we started it
+                                if let Some(mut child) = service_process {
+                                    log::info!("Killing WhatsApp service process");
+                                    let _ = child.kill();
+                                }
                                 break;
                             }
+                            // Log all key presses for debugging
+                            log::debug!("Key pressed: {:?}", key);
                         }
                     }
                     
                     // Let app handle other events
                     if app.handle_event(terminal_event).await? {
+                        // Kill service if we started it
+                        if let Some(mut child) = service_process {
+                            log::info!("Killing WhatsApp service process");
+                            let _ = child.kill();
+                        }
                         break; // App requested quit
                     }
                 }

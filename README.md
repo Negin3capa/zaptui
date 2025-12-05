@@ -120,23 +120,9 @@ cargo build --release
 
 This will compile the Rust terminal interface. The first build may take several minutes as it downloads and compiles all dependencies.
 
-#### Step 4: Install Globally (Optional but Recommended)
+#### Step 4: You're Done!
 
-To make `zaptui` available from anywhere:
-
-```bash
-# Install the binary to your PATH
-cp target/release/zaptui ~/.cargo/bin/
-
-# Or copy to system-wide location
-sudo cp target/release/zaptui /usr/local/bin/
-```
-
-**Note:** Make sure `~/.cargo/bin` is in your PATH. Add this to your `~/.bashrc` or `~/.zshrc` if needed:
-
-```bash
-export PATH="$HOME/.cargo/bin:$PATH"
-```
+ZapTUI is ready to use! Run it from the `zaptui-rust` directory.
 
 #### Step 5: Create Configuration Directory
 
@@ -150,24 +136,12 @@ The config file will be created automatically on first run, or you can copy the 
 cp config.example.toml ~/.config/zaptui/config.toml
 ```
 
-### Quick Install Script
-
-Alternatively, use the automated install script:
-
-```bash
-# From the project root directory
-cd zaptui-rust
-./scripts/install.sh
-```
-
-**Important:** The script must be run from inside the `zaptui-rust` directory, not the project root.
-
 ### Verify Installation
 
-Check that ZapTUI is installed correctly:
+Check that ZapTUI built correctly:
 
 ```bash
-zaptui --version
+./run.sh --version
 ```
 
 You should see output like: `zaptui 2.0.0`
@@ -234,10 +208,11 @@ ls ~/.config/zaptui
 
 ## 🚀 Usage
 
-Just run from anywhere:
+Run ZapTUI from the project directory:
 
 ```bash
-zaptui
+cd zaptui
+./run.sh
 ```
 
 ### First Run

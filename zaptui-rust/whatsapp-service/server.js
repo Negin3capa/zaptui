@@ -13,9 +13,24 @@ class WhatsAppService {
   initializeClient() {
     console.log("Initializing WhatsApp client...");
 
+    // SIMPLE FIX: Always start fresh - session only persists if auth completes successfully
+    const fs = require("fs");
+    const path = require("path");
+    const sessionPath = path.join(__dirname, "../.wwebjs_auth");
+
+    console.log("Cleaning up any existing session...");
+    if (fs.existsSync(sessionPath)) {
+      try {
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+        console.log("Previous session deleted - starting fresh");
+      } catch (err) {
+        console.error("Failed to delete session:", err);
+      }
+    }
+
     this.client = new Client({
       authStrategy: new LocalAuth({
-        dataPath: "../.wwebjs_auth", // Use same auth as old version
+        dataPath: "../.wwebjs_auth",
       }),
       puppeteer: {
         headless: true,
@@ -40,7 +55,7 @@ class WhatsAppService {
     });
 
     this.client.on("authenticated", () => {
-      console.log("Authenticated");
+      console.log("Authenticated successfully");
       this.broadcast({
         event: "authenticated",
       });

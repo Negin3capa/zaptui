@@ -17,7 +17,10 @@ pub struct Config {
 pub struct WhatsAppConfig {
     #[serde(default = "default_service_url")]
     pub service_url: String,
-    
+
+    #[serde(default = "default_service_path")]
+    pub service_path: String,
+
     #[serde(default = "default_session_path")]
     pub session_path: String,
 }
@@ -58,6 +61,10 @@ pub struct NotificationConfig {
 // Default value functions
 fn default_service_url() -> String {
     "ws://localhost:8080".to_string()
+}
+
+fn default_service_path() -> String {
+    "/home/edy/zaptui/zaptui-rust/whatsapp-service/server.js".to_string()
 }
 
 fn default_session_path() -> String {
@@ -137,6 +144,7 @@ impl Config {
             config_path: PathBuf::from("config.toml"),
             whatsapp: WhatsAppConfig {
                 service_url: default_service_url(),
+                service_path: default_service_path(),
                 session_path: old.session_path.unwrap_or_else(default_session_path),
             },
             media: MediaConfig {
@@ -174,6 +182,7 @@ impl Default for Config {
             config_path: PathBuf::from("config.toml"),
             whatsapp: WhatsAppConfig {
                 service_url: default_service_url(),
+                service_path: default_service_path(),
                 session_path: default_session_path(),
             },
             media: MediaConfig {
