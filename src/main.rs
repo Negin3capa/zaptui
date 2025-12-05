@@ -70,10 +70,10 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: 
 
     // Connect to WhatsApp service
     log::info!("Connecting to WhatsApp service at {}", config.whatsapp.service_url);
-    let whatsapp_client = WhatsAppClient::connect(&config.whatsapp.service_url, event_tx).await?;
+    let whatsapp_client = WhatsAppClient::connect(&config.whatsapp.service_url, event_tx.clone()).await?;
     
     // Create app state
-    let mut app = App::new(config.clone(), whatsapp_client);
+    let mut app = App::new(config.clone(), whatsapp_client, event_tx.clone());
 
     // Main event loop
     loop {

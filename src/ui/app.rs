@@ -4,10 +4,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, BorderType, List, ListItem, ListState, Paragraph},
     Frame,
 };
 use std::collections::HashMap;
+use tokio::sync::mpsc;
 
 use crate::config::Config;
 use crate::whatsapp::{Chat, Message, WhatsAppClient, WhatsAppEvent};
@@ -31,6 +32,7 @@ enum FocusedWidget {
 pub struct App {
     theme: Theme,
     client: WhatsAppClient,
+    event_tx: mpsc::Sender<WhatsAppEvent>,
     state: AppState,
     
     // Data
@@ -50,12 +52,13 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(_config: Config, client: WhatsAppClient) -> Self {
+    pub fn new(_config: Config, client: WhatsAppClient, event_tx: mpsc::Sender<WhatsAppEvent>) -> Self {
         let theme = Theme::terminal();  // Always use terminal theme
         
         Self {
             theme,
             client,
+            event_tx,
             state: AppState::Authenticating,
             chats: Vec::new(),
             current_chat_id: None,
@@ -80,6 +83,7 @@ impl App {
             
             WhatsAppEvent::Authenticated => {
                 log::info!("Authenticated");
+                self.qr_code = None; // clear QR code immediately
                 self.status_message = "Authenticated! Loading chats...".to_string();
             }
             
@@ -89,36 +93,34 @@ impl App {
                 self.qr_code = None;
                 self.status_message = "Loading chats (this may take a minute)...".to_string();
                 
-                // Load chats with retry
-                let mut attempts = 0;
-                let max_attempts = 3;
+                // Load chats in background to avoid blocking the event loop
+                let client = self.client.clone(); // WhatsAppClient is cheap to clone (Arc internal)
+                let event_tx = self.event_tx.clone();
                 
-                while attempts < max_attempts {
-                    attempts += 1;
-                    log::info!("Loading chats (attempt {}/{})", attempts, max_attempts);
-                    
-                    match self.client.get_chats().await {
+                tokio::spawn(async move {
+                    log::info!("Starting background chat load...");
+                    match client.get_chats().await {
                         Ok(chats) => {
-                            log::info!("Loaded {} chats", chats.len());
-                            self.chats = chats;
-                            if !self.chats.is_empty() && self.chat_list_state.selected().is_none() {
-                                self.chat_list_state.select(Some(0));
-                            }
-                            self.status_message = format!("Ready - {} chats loaded", self.chats.len());
-                            break;
+                            log::info!("Loaded {} chats in background", chats.len());
+                            let _ = event_tx.send(WhatsAppEvent::ChatsLoaded(chats)).await;
                         }
                         Err(e) => {
-                            log::error!("Failed to load chats (attempt {}): {}", attempts, e);
-                            log::error!("Error details: {:?}", e);
-                            if attempts < max_attempts {
-                                self.status_message = format!("Retrying... (attempt {}/{})", attempts + 1, max_attempts);
-                                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                            } else {
-                                self.status_message = format!("Error: Check logs. Press 'q' to quit.");
-                            }
+                            log::error!("Failed to load chats: {}", e);
+                            // Verify functionality: for now just log, maybe add Error event later
                         }
                     }
-                }
+                });
+            }
+            
+            WhatsAppEvent::ChatsLoaded(chats) => {
+                 self.chats = chats;
+                 if !self.chats.is_empty() && self.chat_list_state.selected().is_none() {
+                     self.chat_list_state.select(Some(0));
+                 }
+                 self.status_message = format!("Ready - {} chats loaded", self.chats.len());
+                 // Ensure we are in Ready state
+                 self.state = AppState::Ready;
+                 // Force UI refresh if needed by triggering a render (handled by loop)
             }
             
             WhatsAppEvent::MessageReceived(msg) => {
@@ -285,12 +287,21 @@ impl App {
             }
             
             KeyCode::Backspace => {
-                self.input_buffer.pop();
+                if self.input_buffer.is_empty() {
+                    self.focused = FocusedWidget::ChatList;
+                } else {
+                    self.input_buffer.pop();
+                }
             }
             
             KeyCode::Esc => {
                 // Clear input buffer
-                self.input_buffer.clear();
+                // Clear input buffer
+                if self.input_buffer.is_empty() {
+                    self.focused = FocusedWidget::ChatList;
+                } else {
+                    self.input_buffer.clear();
+                }
             }
             
             _ => {}
@@ -407,15 +418,17 @@ impl App {
             .block(Block::default()
                 .borders(Borders::ALL)
                 .title(" ZapTUI ")
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(self.theme.border)));
         
         frame.render_widget(loading, frame.area());
     }
     
     fn render_qr(&mut self, frame: &mut Frame) {
+        let status_text = format!("{} (Ctrl+C to Quit)", self.status_message);
         let qr_view = QRView::new(
             self.qr_code.as_ref().unwrap(),
-            &self.status_message,
+            &status_text,
             &self.theme,
         );
         frame.render_widget(qr_view, frame.area());
@@ -486,6 +499,7 @@ impl App {
             .block(Block::default()
                 .title(" Chats ")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color)))
             .highlight_style(Style::default()
                 .bg(self.theme.primary)
@@ -568,6 +582,7 @@ impl App {
             .block(Block::default()
                 .title(title)
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color)))
             .scroll((scroll_offset, 0));
         
@@ -585,6 +600,7 @@ impl App {
             .block(Block::default()
                 .title(" Type message (Enter: send, Esc: clear, Tab: change focus) ")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color)));
         
         frame.render_widget(input, area);

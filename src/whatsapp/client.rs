@@ -12,6 +12,7 @@ use super::types::*;
 type PendingRequests = Arc<RwLock<HashMap<String, mpsc::Sender<WhatsAppResponse>>>>;
 
 /// WhatsApp client that communicates with Node.js service via WebSocket
+#[derive(Clone)]
 pub struct WhatsAppClient {
     write_tx: mpsc::Sender<WsMessage>,
     pending: PendingRequests,

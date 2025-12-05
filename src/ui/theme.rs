@@ -23,13 +23,13 @@ impl Theme {
             system: Color::DarkGray,
             
             // Transparent white border when unfocused
-            border: Color::Gray,
+            border: Color::Reset,
             
             // Green when focused
             border_focused: Color::Green,
             
             // Message colors use terminal palette
-            me: Color::Cyan,
+            me: Color::White,
             other: Color::Green,
             highlight: Color::Yellow,
             primary: Color::Blue,
