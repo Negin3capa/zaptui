@@ -111,6 +111,7 @@ impl Config {
     }
     
     /// Migrate from old JavaScript config.json format
+    #[allow(dead_code)]
     fn migrate_from_json(json_path: &Path) -> Result<Self> {
         #[derive(Deserialize)]
         struct OldConfig {
@@ -156,6 +157,7 @@ impl Config {
     }
     
     /// Save configuration to config.toml
+    #[allow(dead_code)]
     pub fn save(&self) -> Result<()> {
         let content = toml::to_string_pretty(self)
             .context("Failed to serialize config")?;

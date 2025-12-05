@@ -29,7 +29,6 @@ enum FocusedWidget {
 }
 
 pub struct App {
-    config: Config,
     theme: Theme,
     client: WhatsAppClient,
     state: AppState,
@@ -51,11 +50,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: Config, client: WhatsAppClient) -> Self {
+    pub fn new(_config: Config, client: WhatsAppClient) -> Self {
         let theme = Theme::terminal();  // Always use terminal theme
         
         Self {
-            config,
             theme,
             client,
             state: AppState::Authenticating,

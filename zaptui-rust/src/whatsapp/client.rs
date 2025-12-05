@@ -164,6 +164,7 @@ impl WhatsAppClient {
     }
     
     /// Download media
+    #[allow(dead_code)]
     pub async fn download_media(&self, message_id: &str) -> Result<Vec<u8>> {
         let result = self.request("downloadMedia", json!({
             "messageId": message_id

@@ -4,8 +4,6 @@ use ratatui::style::Color;
 
 #[derive(Debug, Clone)]
 pub struct Theme {
-    // Use terminal's default colors for text
-    pub text: Color,
     pub system: Color,
     
     // Borders
@@ -22,8 +20,6 @@ pub struct Theme {
 impl Theme {
     pub fn terminal() -> Self {
         Self {
-            // Use terminal's default foreground
-            text: Color::Reset,
             system: Color::DarkGray,
             
             // Transparent white border when unfocused
@@ -38,10 +34,5 @@ impl Theme {
             highlight: Color::Yellow,
             primary: Color::Blue,
         }
-    }
-    
-    pub fn from_name(_name: &str) -> Self {
-        // Always use terminal theme
-        Self::terminal()
     }
 }
