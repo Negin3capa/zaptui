@@ -15,7 +15,7 @@ class WhatsAppService {
 
     this.client = new Client({
       authStrategy: new LocalAuth({
-        dataPath: "../.wwebjs_auth", // Use same auth as old version
+        dataPath: process.env.ZAPTUI_AUTH_PATH || "../.wwebjs_auth",
       }),
       puppeteer: {
         headless: true,

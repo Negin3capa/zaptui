@@ -73,12 +73,15 @@ chmod +x zaptui
 
 echo -e "\n${BLUE}🔗 Installation Options${NC}"
 echo "1) Local Install (Recommended for dev) - Just run './zaptui'"
-echo "2) Add to User PATH (~/.cargo/bin) - Create a symlink"
-echo "3) System Install (/usr/local/bin) - Create a symlink (Requires sudo)"
+echo "2) Add to User PATH (~/.cargo/bin) - Create a symlink to local wrapper"
+echo "3) Global Install (~/.local/share/zaptui) - Full global installation (RECOMMENDED)"
+echo "4) System Install (/usr/local/bin) - Create a symlink (Requires sudo)"
 
-# Interactive limit check - if non-interactive, default to just build
-if [ -t 0 ]; then
-    read -p "Choose an option [1-3]: " CHOICE
+# Check for --global flag for non-interactive mode
+if [[ "$1" == "--global" ]]; then
+    CHOICE=3
+elif [ -t 0 ]; then
+    read -p "Choose an option [1-4]: " CHOICE
 else
     echo "Non-interactive mode detected. Skipping PATH integration."
     CHOICE=1
@@ -95,6 +98,56 @@ case $CHOICE in
         echo "Make sure $BIN_DIR is in your PATH."
         ;;
     3)
+        echo -e "\n${BLUE}📦 Installing globally to ~/.local/share/zaptui${NC}"
+
+        INSTALL_DIR="$HOME/.local/share/zaptui"
+        BIN_DIR="$HOME/.cargo/bin"
+
+        # Create installation directory
+        mkdir -p "$INSTALL_DIR"
+        mkdir -p "$BIN_DIR"
+
+        # Copy and setup WhatsApp service
+        echo "📋 Installing WhatsApp service..."
+        rm -rf "$INSTALL_DIR/whatsapp-service"
+        cp -r whatsapp-service "$INSTALL_DIR/"
+
+        # Install Node dependencies at new location
+        echo "📦 Installing service dependencies..."
+        cd "$INSTALL_DIR/whatsapp-service"
+        npm install --silent
+        cd - > /dev/null
+
+        # Install binary to installation directory
+        echo "📋 Installing binary..."
+        cp ./target/release/zaptui "$INSTALL_DIR/zaptui-bin"
+        chmod +x "$INSTALL_DIR/zaptui-bin"
+
+        # Install wrapper script
+        echo "📋 Installing wrapper..."
+        cp zaptui-wrapper "$BIN_DIR/zaptui"
+        chmod +x "$BIN_DIR/zaptui"
+
+        # Migrate auth data if it exists
+        if [ -d "./.wwebjs_auth" ]; then
+            echo -e "\n${YELLOW}⚠️  Found existing WhatsApp authentication data${NC}"
+            read -p "Migrate to global installation? [Y/n]: " -n 1 -r
+            echo
+
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                echo "📋 Migrating authentication data..."
+                rm -rf "$INSTALL_DIR/.wwebjs_auth"
+                cp -r ./.wwebjs_auth "$INSTALL_DIR/"
+                echo -e "${GREEN}✅ Authentication data migrated${NC}"
+            fi
+        fi
+
+        echo -e "${GREEN}✅ Global installation complete!${NC}"
+        echo ""
+        echo "You can now run 'zaptui' from anywhere."
+        echo "Make sure $BIN_DIR is in your PATH."
+        ;;
+    4)
         ABS_PATH="$(pwd)/zaptui"
         echo "Running sudo to create symlink..."
         sudo ln -sf "$ABS_PATH" "/usr/local/bin/zaptui"
@@ -107,5 +160,9 @@ esac
 
 echo -e "\n${GREEN}🎉 Setup Complete!${NC}"
 echo "To start ZapTUI, run:"
-echo -e "  ${BLUE}./zaptui${NC}  (or 'zaptui' if installed to PATH)"
+if [ "$CHOICE" == "3" ]; then
+    echo -e "  ${BLUE}zaptui${NC}  (from anywhere)"
+else
+    echo -e "  ${BLUE}./zaptui${NC}  (or 'zaptui' if installed to PATH)"
+fi
 echo ""

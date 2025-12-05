@@ -1,7 +1,7 @@
 
 # ZapTUI Makefile
 
-.PHONY: all build install clean run
+.PHONY: all build install install-global uninstall clean run
 
 all: build
 
@@ -12,6 +12,12 @@ build:
 
 install:
 	@./install.sh
+
+install-global:
+	@./install.sh --global
+
+uninstall:
+	@./scripts/uninstall.sh
 
 clean:
 	cargo clean
