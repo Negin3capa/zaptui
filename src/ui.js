@@ -1,9 +1,9 @@
-const blessed = require('blessed');
+const blessed = require('neo-blessed');
 const qrcode = require('qrcode-terminal');
 const imageViewer = require('./image-viewer');
 const qrcodeText = require('qrcode');
-const stringWidth = (...args) => import('string-width').then(({default: stringWidth}) => stringWidth(...args));
-const stripAnsi = (...args) => import('strip-ansi').then(({default: stripAnsi}) => stripAnsi(...args));
+const stringWidth = require('string-width');
+const stripAnsi = require('strip-ansi');
 
 const THEME = {
     primary: 'white',
@@ -21,19 +21,41 @@ class TUI {
         this.client = client;
         this.screen = blessed.screen({
             smartCSR: true,
+            fastCSR: true,        // Faster rendering optimization
+            useBCE: true,         // Back-color-erase optimization
+            resizeTimeout: 300,   // Debounce resize events (good for tiling WM)
             title: 'Zap CLI',
             fullUnicode: true,
-            dockBorders: true
+            forceUnicode: true,   // Force unicode rendering
+            dockBorders: true,
+            cursor: {
+                artificial: true,
+                shape: 'line',
+                blink: true,
+                color: null
+            }
         });
 
         this.currentChat = null;
         this.currentMessages = [];
         this.chats = [];
         this.contactCache = new Map();
-        
+        this.renderScheduled = false;  // For render debouncing
+
         this.setupLayout();
         this.setupEvents();
-        this.screen.render();
+        this.render();
+    }
+
+    // Debounced render method to prevent flickering
+    render() {
+        if (this.renderScheduled) return;
+
+        this.renderScheduled = true;
+        setImmediate(() => {
+            this.screen.render();
+            this.renderScheduled = false;
+        });
     }
 
     setupLayout() {
@@ -58,7 +80,7 @@ class TUI {
             height: '100%',
             width: '70%'
         });
-        
+
         // Sidebar for Chats
         this.chatList = blessed.list({
             parent: this.sidebar,
@@ -122,7 +144,8 @@ class TUI {
                 track: { bg: 'black' }
             },
             noCellBorders: true,
-            data: null
+            interactive: false,    // Reduce interaction overhead
+            data: [['', '']]       // Start with empty data, not null
         });
 
         // Input Area
@@ -166,8 +189,11 @@ class TUI {
         });
 
         this.screen.on('resize', () => {
-            this.setChats(this.chats);
-            this.screen.render();
+            // resizeTimeout in screen config handles debouncing
+            if (this.chats && this.chats.length > 0) {
+                this.setChats(this.chats);
+            }
+            // Don't call render here - resizeTimeout handles it automatically
         });
 
         // Message Input
@@ -177,10 +203,10 @@ class TUI {
                 await this.client.sendMessage(this.currentChat.id._serialized, text);
                 this.inputBox.clearValue();
                 this.inputBox.focus(); // Keep focus
-                this.screen.render();
+                this.render();
             }
         });
-        
+
         // Handle Tab to switch focus
         this.screen.key(['tab'], () => {
             this.screen.focusNext();
@@ -204,14 +230,14 @@ class TUI {
 
     log(msg) {
         this.statusBar.setContent(`{bold}${msg}{/bold}`);
-        this.screen.render();
+        this.render();
     }
 
     async showQR(qrData) {
         try {
             const str = await qrcodeText.toString(qrData, { type: 'terminal', small: true });
             this.chatBox.setContent(`SCAN QR CODE:\n${str}`);
-            this.screen.render();
+            this.render();
         } catch (e) {
             this.chatBox.setContent(`QR Code received. Please check logs.`);
         }
@@ -237,14 +263,14 @@ class TUI {
                 }
                 name = truncated + '...';
             }
-            
+
             const cleanName = stripAnsi(name);
             const visibleWidth = stringWidth(cleanName);
             const padding = ' '.repeat(Math.max(0, maxNameLength - visibleWidth));
             return name + padding;
         });
         this.chatList.setItems(items);
-        this.screen.render();
+        this.render();
     }
 
     async selectChat(chat) {
@@ -257,35 +283,35 @@ class TUI {
         this.currentMessages = [];
         this.messageLimit = 20;
         this.isLoadingMessages = false;
-        
+
         let chatName = chat.name;
         try {
             const contact = await chat.getContact();
             chatName = contact.name || contact.pushname || chat.name || contact.number;
-        } catch(e) {
+        } catch (e) {
             // keep chat.name
         }
 
         this.chatBox.setLabel(` {bold}${chatName}{/bold} `);
         this.chatBox.setContent('{center}Loading messages...{/center}');
-        this.screen.render();
+        this.render();
 
         const messages = await chat.fetchMessages({ limit: this.messageLimit });
-        
+
         // Pre-format messages in parallel
         await Promise.all(messages.map(msg => this.formatMessage(msg)));
 
         // Merge with any real-time messages that arrived during fetch
         const currentIds = new Set(this.currentMessages.map(m => m.id._serialized));
         const newMessages = messages.filter(m => !currentIds.has(m.id._serialized));
-        
+
         this.currentMessages = [...newMessages, ...this.currentMessages];
-        
+
         // Batch update UI using setRows for listtable
         const tableData = this.currentMessages.map(m => m._displayData);
         this.chatBox.setRows([['Sender', 'Message'], ...tableData]);
 
-        this.screen.render();
+        this.render();
         this.inputBox.focus();
 
         // Periodic fetching disabled to prevent rendering artifacts
@@ -318,7 +344,7 @@ class TUI {
         }
 
         let content = msg.body;
-        
+
         // Escape content to prevent tag parsing issues and strip specific zero-width chars
         if (content) {
             content = content.replace(/[\u200B-\u200D\uFEFF]/g, ''); // Strip zero-width spaces and joiners
@@ -326,28 +352,28 @@ class TUI {
         }
 
         if (msg.hasMedia) {
-             content = `{${THEME.highlight}-fg}[MEDIA: ${msg.type}] (Right-click to view){/}`;
+            content = `{${THEME.highlight}-fg}[MEDIA: ${msg.type}] (Right-click to view){/}`;
         }
 
         let time = new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
         time = time.replace(/\s+/g, '');
-        
+
         const formatted = `{${THEME.timestamp}-fg}${time}{/} {bold}{${senderColor}-fg}${sender}{/}`;
         msg._displayString = formatted; // Keep for compatibility if needed elsewhere
-        
+
         // Ensure content is a string before stripping ANSI codes
-        const cleanContent = typeof content === 'string' ? await stripAnsi(content) : '';
+        const cleanContent = typeof content === 'string' ? stripAnsi(content) : '';
         msg._displayData = [formatted, cleanContent];
         return msg._displayData;
     }
 
     async appendMessage(msg) {
         if (!this.currentChat || msg.id.remote !== this.currentChat.id._serialized) {
-             if (msg.fromMe && this.currentChat && msg.to === this.currentChat.id._serialized) {
-                 // proceed
-             } else {
-                 return;
-             }
+            if (msg.fromMe && this.currentChat && msg.to === this.currentChat.id._serialized) {
+                // proceed
+            } else {
+                return;
+            }
         }
 
         const formatted = await this.formatMessage(msg);
@@ -356,11 +382,11 @@ class TUI {
         // Atomic update for listtable
         const tableData = this.currentMessages.map(m => m._displayData);
         this.chatBox.setRows([['Sender', 'Message'], ...tableData]);
-        
+
         // Auto-scroll to bottom for new incoming messages
         this.chatBox.scrollTo(this.chatBox.items.length);
-        
-        this.screen.render();
+
+        this.render();
     }
 
     async loadOlderMessages() {
@@ -370,20 +396,20 @@ class TUI {
         try {
             this.messageLimit += 10;
             const messages = await this.currentChat.fetchMessages({ limit: this.messageLimit });
-            
+
             const currentIds = new Set(this.currentMessages.map(m => m.id._serialized));
             const newMessages = [];
-            
+
             for (const msg of messages) {
                 if (!currentIds.has(msg.id._serialized)) {
                     newMessages.push(msg);
                 }
             }
-            
+
             if (newMessages.length > 0) {
                 // Pre-format messages in parallel
                 await Promise.all(newMessages.map(msg => this.formatMessage(msg)));
-                
+
                 this.currentMessages = [...newMessages, ...this.currentMessages];
                 this.refreshChatBox();
             }
@@ -397,50 +423,50 @@ class TUI {
     refreshChatBox() {
         const oldScroll = this.chatBox.getScroll();
         const oldLines = this.chatBox.getScrollHeight();
-        
+
         const tableData = this.currentMessages.map(m => m._displayData);
         this.chatBox.setRows([['Sender', 'Message'], ...tableData]);
-        
+
         const newLines = this.chatBox.items.length;
         const addedLines = newLines - oldLines;
-        
+
         if (addedLines > 0) {
-             this.chatBox.scrollTo(oldScroll + addedLines);
+            this.chatBox.scrollTo(oldScroll + addedLines);
         }
-        
-        this.screen.render();
+
+        this.render();
     }
 
     async viewMedia(msg) {
         if (!msg.hasMedia) return;
-        
+
         this.log('Downloading media...');
         try {
             const media = await msg.downloadMedia();
             if (media) {
                 const buffer = Buffer.from(media.data, 'base64');
                 this.log('Displaying image...');
-                
-                if (imageViewer.isKitty) {
-                   process.stdout.write('\x1b[2J\x1b[H'); // Clear screen
-                   imageViewer.display(buffer);
-                   
-                   this.screen.lockKeys = true;
-                   
-                   const restore = () => {
-                       process.stdin.setRawMode(true);
-                       process.stdin.resume();
-                       this.screen.alloc();
-                       this.screen.render();
-                       this.screen.lockKeys = false;
-                       process.stdin.removeListener('data', onKey);
-                   };
 
-                   const onKey = (key) => {
-                       restore();
-                   };
-                   
-                   process.stdin.once('data', onKey);
+                if (imageViewer.isKitty) {
+                    process.stdout.write('\x1b[2J\x1b[H'); // Clear screen
+                    imageViewer.display(buffer);
+
+                    this.screen.lockKeys = true;
+
+                    const restore = () => {
+                        process.stdin.setRawMode(true);
+                        process.stdin.resume();
+                        this.screen.alloc();
+                        this.render();
+                        this.screen.lockKeys = false;
+                        process.stdin.removeListener('data', onKey);
+                    };
+
+                    const onKey = (key) => {
+                        restore();
+                    };
+
+                    process.stdin.once('data', onKey);
                 } else {
                     this.log('Terminal not supported for inline images. Saved to disk.');
                     const fs = require('fs');

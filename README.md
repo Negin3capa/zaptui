@@ -63,16 +63,37 @@ Edit `config.json` to customize settings:
 
 ## Usage
 
-Start the application:
+### Installation for Global Command
+
+For the easiest experience (run `zaptui` from anywhere):
 
 ```bash
-npm start
+# Install globally
+npm link
+
+# Or
+npm install -g .
 ```
 
-or
+### Start the application
 
+**Method 1: Global Command** (Recommended):
+```bash
+zaptui
+```
+
+**Method 2: NPM Script**:
+```bash
+npm start
+# or
+npm run zaptui
+```
+
+**Method 3: Direct Execution**:
 ```bash
 node index.js
+# or
+./bin/zaptui
 ```
 
 ### First Time Login
