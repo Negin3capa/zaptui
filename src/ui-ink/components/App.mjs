@@ -1,72 +1,88 @@
 import React from "react";
-import { Box, Text } from "ink";
+import { Box, useApp, useInput } from "ink";
+import QRCodeView from "./QRCodeView.mjs";
+import ChatList from "./ChatList.mjs";
+import MessageList from "./MessageList.mjs";
+import MessageInput from "./MessageInput.mjs";
+import StatusBar from "./StatusBar.mjs";
+import { useWhatsApp } from "../hooks/useWhatsApp.mjs";
+import { useMessages } from "../hooks/useMessages.mjs";
 
 /**
  * Main Ink application component
  * Replaces the neo-blessed TUI class
- *
- * Note: Using React.createElement instead of JSX to avoid needing a transpiler
  */
 const App = ({ client }) => {
-  const [status, setStatus] = React.useState("Initializing...");
+  const { exit } = useApp();
+  const { qr, ready, chats, status } = useWhatsApp(client);
+  const [selectedChatIndex, setSelectedChatIndex] = React.useState(0);
+  const [currentChat, setCurrentChat] = React.useState(null);
+  const { messages, loading, contactCache } = useMessages(client, currentChat);
 
-  React.useEffect(() => {
-    // Basic event listener setup
-    const handleQR = (qr) => {
-      setStatus("QR Code received - scan to login");
-    };
+  // Handle Ctrl+C to exit
+  useInput((input, key) => {
+    if (key.ctrl && input === "c") {
+      exit();
+    }
+  });
 
-    const handleReady = () => {
-      setStatus("WhatsApp Client is Ready!");
-    };
+  // Handle chat selection
+  const handleSelectChat = React.useCallback((chat, index) => {
+    setSelectedChatIndex(index);
+    setCurrentChat(chat);
+  }, []);
 
-    const handleAuthenticated = () => {
-      setStatus("Authenticated successfully!");
-    };
+  // Handle message send
+  const handleSendMessage = React.useCallback(
+    async (text) => {
+      if (currentChat && text.trim()) {
+        try {
+          await client.sendMessage(currentChat.id._serialized, text);
+        } catch (error) {
+          console.error("Error sending message:", error);
+        }
+      }
+    },
+    [client, currentChat],
+  );
 
-    const handleAuthFailure = (msg) => {
-      setStatus(`Auth failure: ${msg}`);
-    };
+  // Show QR code view if not ready
+  if (!ready && qr) {
+    return React.createElement(
+      Box,
+      { flexDirection: "column", height: "100%" },
+      React.createElement(QRCodeView, { qrCode: qr }),
+      React.createElement(StatusBar, { message: status, type: "info" }),
+    );
+  }
 
-    client.on("qr", handleQR);
-    client.on("ready", handleReady);
-    client.on("authenticated", handleAuthenticated);
-    client.on("auth_failure", handleAuthFailure);
-
-    return () => {
-      // Cleanup listeners
-      client.off("qr", handleQR);
-      client.off("ready", handleReady);
-      client.off("authenticated", handleAuthenticated);
-      client.off("auth_failure", handleAuthFailure);
-    };
-  }, [client]);
-
-  // Using React.createElement instead of JSX
+  // Show main chat interface
   return React.createElement(
     Box,
     { flexDirection: "column", height: "100%" },
     React.createElement(
       Box,
-      {
-        borderStyle: "single",
-        borderColor: "green",
-        padding: 1,
-        flexGrow: 1,
-        justifyContent: "center",
-        alignItems: "center",
-      },
+      { flexDirection: "row", flexGrow: 1 },
+      React.createElement(ChatList, {
+        chats: chats,
+        selectedIndex: selectedChatIndex,
+        onSelect: handleSelectChat,
+      }),
       React.createElement(
-        Text,
-        { color: "green", bold: true },
-        "ZapTUI - Ink Version (Phase 1)",
+        Box,
+        { flexDirection: "column", flexGrow: 1 },
+        React.createElement(MessageList, {
+          messages: messages,
+          currentChat: currentChat,
+          contactCache: contactCache,
+        }),
+        React.createElement(MessageInput, {
+          onSubmit: handleSendMessage,
+          disabled: !currentChat,
+        }),
       ),
     ),
-    React.createElement(
-      Box,
-      { borderStyle: "single", borderColor: "blue", padding: 1 },
-      React.createElement(Text, { color: "white" }, status),
-    ),
+    React.createElement(StatusBar, { message: status, type: "success" }),
   );
 };
 
