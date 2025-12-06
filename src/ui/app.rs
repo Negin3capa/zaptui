@@ -54,8 +54,9 @@ pub struct App {
     chat_list_area: Rect,  // Store chat list area for mouse click detection
     message_view_area: Rect,  // Store message view area for mouse detection
     input_area: Rect,  // Store input area for mouse detection
-    message_scroll: u16,  // Scroll offset for message view
+    message_scroll: u16,  // Scroll offset for message view (0 = bottom/newest)
     input_buffer: String,
+    loading_more_messages: HashMap<String, bool>,  // Track if loading older messages for a chat
     
     // Authentication
     qr_code: Option<String>,
@@ -83,6 +84,7 @@ impl App {
             input_area: Rect::default(),
             message_scroll: 0,
             input_buffer: String::new(),
+            loading_more_messages: HashMap::new(),
             qr_code: None,
             status_message: "Connecting to WhatsApp...".to_string(),
         }
@@ -213,15 +215,41 @@ impl App {
                 }
             }
 
-            WhatsAppEvent::MessagesLoaded(chat_id, messages) => {
-                log::debug!("Messages loaded for chat {}: {} messages", chat_id, messages.len());
+            WhatsAppEvent::MessagesLoaded(chat_id, new_messages) => {
+                log::debug!("Messages loaded for chat {}: {} messages", chat_id, new_messages.len());
                 
-                // Update messages cache
-                self.messages.insert(chat_id.clone(), messages.clone());
+                // Merge with existing messages (for pagination)
+                if let Some(existing) = self.messages.get_mut(&chat_id) {
+                    let old_count = existing.len();
+                    
+                    // Prepend new messages (older ones) and deduplicate
+                    let mut all_messages = new_messages.clone();
+                    all_messages.extend(existing.clone());
+                    
+                    // Deduplicate by message ID, keeping first occurrence
+                    let mut seen = std::collections::HashSet::new();
+                    all_messages.retain(|msg| seen.insert(msg.id.clone()));
+                    
+                    // Sort by timestamp (oldest first)
+                    all_messages.sort_by_key(|m| m.timestamp);
+                    
+                    *existing = all_messages;
+                    
+                    let new_count = existing.len() - old_count;
+                    if new_count > 0 {
+                        log::info!("Loaded {} new older messages", new_count);
+                    }
+                } else {
+                    // Initial load
+                    self.messages.insert(chat_id.clone(), new_messages.clone());
+                }
+                
+                // Clear loading flag
+                self.loading_more_messages.insert(chat_id.clone(), false);
                 
                 // Update status message
                 if let Some(chat) = self.chats.iter().find(|c| c.id == chat_id) {
-                    let count = messages.len();
+                    let count = self.messages.get(&chat_id).map(|m| m.len()).unwrap_or(0);
                     self.status_message = format!("{} - {} messages", chat.name, count);
                 }
             }
@@ -371,14 +399,8 @@ impl App {
                         self.chat_list_scroll = (self.chat_list_scroll + 1).min(max_scroll);
                     }
                     FocusedWidget::MessageView => {
-                        // Only scroll if we have messages to scroll
-                        if let Some(chat_id) = &self.current_chat_id {
-                            if let Some(messages) = self.messages.get(chat_id) {
-                                // Don't scroll beyond the content
-                                // We'll let the render function handle clamping
-                                self.message_scroll = self.message_scroll.saturating_add(3);
-                            }
-                        }
+                        // Scroll down = show newer messages (decrease scroll toward 0)
+                        self.message_scroll = self.message_scroll.saturating_sub(3);
                     }
                     _ => {}
                 }
@@ -391,8 +413,18 @@ impl App {
                         self.chat_list_scroll = self.chat_list_scroll.saturating_sub(1);
                     }
                     FocusedWidget::MessageView => {
-                        // Scroll messages up (show newer messages)
-                        self.message_scroll = self.message_scroll.saturating_sub(3);
+                        // Scroll up = show older messages (increase offset from bottom)
+                        if let Some(chat_id) = &self.current_chat_id {
+                            if let Some(messages) = self.messages.get(chat_id) {
+                                let num_lines = messages.len();
+                                let available_height = self.message_view_area.height.saturating_sub(2) as usize;
+                                let max_scroll = num_lines.saturating_sub(available_height);
+                                
+                                if (self.message_scroll as usize) < max_scroll {
+                                    self.message_scroll = self.message_scroll.saturating_add(3);
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -405,10 +437,30 @@ impl App {
     
     fn handle_message_scroll(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Down => {
-                self.message_scroll = self.message_scroll.saturating_add(1);
-            }
             KeyCode::Up => {
+                // Scroll up = show older messages (increase offset from bottom)
+                if let Some(chat_id) = &self.current_chat_id {
+                    if let Some(messages) = self.messages.get(chat_id) {
+                        let num_lines = messages.len();
+                        let available_height = self.message_view_area.height.saturating_sub(2) as usize;
+                        let max_scroll = num_lines.saturating_sub(available_height);
+
+                        if (self.message_scroll as usize) < max_scroll {
+                            self.message_scroll = self.message_scroll.saturating_add(1);
+                            
+                            // Pagination: Check if we're near the top (within 5 lines of oldest message)
+                            if (self.message_scroll as usize) >= max_scroll.saturating_sub(5) {
+                                let is_loading = self.loading_more_messages.get(chat_id).copied().unwrap_or(false);
+                                if !is_loading && num_lines >= 50 {  // Only paginate if we have at least initial load
+                                    self.load_more_messages(chat_id.clone(), num_lines);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Down => {
+                // Scroll down = show newer messages (decrease offset, toward 0 = bottom)
                 self.message_scroll = self.message_scroll.saturating_sub(1);
             }
             _ => {}
@@ -556,6 +608,30 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn load_more_messages(&mut self, chat_id: String, current_count: usize) {
+        // Mark as loading
+        self.loading_more_messages.insert(chat_id.clone(), true);
+        self.status_message = "Loading older messages...".to_string();
+        log::info!("Loading more messages for chat: {} (current: {})", chat_id, current_count);
+
+        let client = self.client.clone();
+        let event_tx = self.event_tx.clone();
+
+        tokio::spawn(async move {
+            // Request more messages - WhatsApp API will return oldest to newest
+            match client.get_messages(&chat_id, current_count + 50).await {
+                Ok(messages) => {
+                    let _ = event_tx.send(WhatsAppEvent::MessagesLoaded(chat_id, messages)).await;
+                }
+                Err(e) => {
+                    log::error!("Failed to load more messages: {}", e);
+                    let error_msg = format!("Failed to load older messages: {}", e);
+                    let _ = event_tx.send(WhatsAppEvent::Error(error_msg)).await;
+                }
+            }
+        });
     }
 
     /// Refresh messages for the current chat (useful for periodic sync)
@@ -872,7 +948,7 @@ impl App {
                 };
 
                 let time = chrono::DateTime::from_timestamp(msg.timestamp, 0)
-                    .map(|dt| dt.format("%H:%M").to_string())
+                    .map(|dt| dt.with_timezone(&chrono::Local).format("%H:%M").to_string())
                     .unwrap_or_default();
 
                 let body = if msg.has_media {
@@ -902,25 +978,19 @@ impl App {
     };
     
     // Calculate scroll offset
+    // Inverted: scroll=0 means "at bottom" (newest messages)
+    // Increasing message_scroll means scrolling UP (shows older messages)
     let num_lines = messages_text.lines.len();
     let available_height = area.height.saturating_sub(2) as usize;
-        
-        // Calculate max scroll to prevent scrolling beyond content
-        let max_scroll = num_lines.saturating_sub(available_height);
-        
-        // Clamp scroll to valid range
-        if (self.message_scroll as usize) > max_scroll {
-            self.message_scroll = max_scroll as u16;
-        }
-        
-        // Use manual scroll if > 0, otherwise auto-scroll to bottom
-        let scroll_offset = if self.message_scroll > 0 {
-            self.message_scroll
-        } else if num_lines > available_height {
-            (num_lines - available_height) as u16
-        } else {
-            0
-        };
+    
+    // Calculate scroll offset from bottom
+    let scroll_offset = if num_lines > available_height {
+        let max_scroll = (num_lines - available_height) as u16;
+        // Invert: subtract message_scroll from max to scroll from bottom
+        max_scroll.saturating_sub(self.message_scroll)
+    } else {
+        0  // Not enough messages to scroll
+    };
         
         // Border color based on focus
         let border_color = if self.focused == FocusedWidget::MessageView {
