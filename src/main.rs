@@ -75,6 +75,9 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: 
     // Create app state
     let mut app = App::new(config.clone(), whatsapp_client, event_tx.clone());
 
+    // Create a periodic sync timer (every 30 seconds)
+    let mut sync_interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+
     // Main event loop
     loop {
         // Render UI
@@ -89,6 +92,14 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: 
                 app.handle_whatsapp_event(wa_event).await?;
             }
             
+            // Periodic sync
+            _ = sync_interval.tick() => {
+                // Only sync if we're in Ready state and have a current chat
+                if let Err(e) = app.refresh_current_chat_messages().await {
+                    log::warn!("Periodic sync failed: {}", e);
+                }
+            }
+
             // Terminal events (keyboard/mouse)
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
                 if event::poll(tokio::time::Duration::from_millis(0))? {
