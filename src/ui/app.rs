@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind, MouseButton};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -43,6 +43,8 @@ pub struct App {
     // UI State
     focused: FocusedWidget,
     chat_list_state: ListState,
+    chat_list_scroll: usize,  // Scroll offset for chat list
+    chat_list_area: Rect,  // Store chat list area for mouse click detection
     message_scroll: u16,  // Scroll offset for message view
     input_buffer: String,
     
@@ -65,6 +67,8 @@ impl App {
             messages: HashMap::new(),
             focused: FocusedWidget::ChatList,
             chat_list_state: ListState::default(),
+            chat_list_scroll: 0,
+            chat_list_area: Rect::default(),
             message_scroll: 0,
             input_buffer: String::new(),
             qr_code: None,
@@ -184,14 +188,18 @@ impl App {
     
     /// Handle terminal events
     pub async fn handle_event(&mut self, event: Event) -> Result<bool> {
-        if let Event::Key(key) = event {
-            if key.kind != KeyEventKind::Press {
-                return Ok(false);
+        match event {
+            Event::Key(key) => {
+                if key.kind != KeyEventKind::Press {
+                    return Ok(false);
+                }
+                self.handle_key(key).await
             }
-            return self.handle_key(key).await;
+            Event::Mouse(mouse) => {
+                self.handle_mouse(mouse).await
+            }
+            _ => Ok(false),
         }
-        
-        Ok(false)
     }
     
     async fn handle_key(&mut self, key: KeyEvent) -> Result<bool> {
@@ -233,6 +241,50 @@ impl App {
         }
     }
     
+    async fn handle_mouse(&mut self, mouse: MouseEvent) -> Result<bool> {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Check if click is within chat list area
+                let x = mouse.column;
+                let y = mouse.row;
+                
+                if x >= self.chat_list_area.x && x < self.chat_list_area.x + self.chat_list_area.width
+                    && y >= self.chat_list_area.y && y < self.chat_list_area.y + self.chat_list_area.height
+                {
+                    // Calculate which chat was clicked
+                    // Subtract 1 for the border at the top
+                    let relative_y = y.saturating_sub(self.chat_list_area.y + 1);
+                    let clicked_index = self.chat_list_scroll + relative_y as usize;
+                    
+                    if clicked_index < self.chats.len() {
+                        // Select the clicked chat
+                        self.chat_list_state.select(Some(clicked_index));
+                        self.focused = FocusedWidget::ChatList;
+                        
+                        // Clear input and reset message scroll
+                        self.input_buffer.clear();
+                        self.message_scroll = 0;
+                        
+                        // Load messages for the clicked chat
+                        self.load_chat_messages_background(clicked_index).await?;
+                    }
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                // Scroll the chat list down (show later items)
+                let max_scroll = self.chats.len().saturating_sub(1);
+                self.chat_list_scroll = (self.chat_list_scroll + 1).min(max_scroll);
+            }
+            MouseEventKind::ScrollUp => {
+                // Scroll the chat list up (show earlier items)
+                self.chat_list_scroll = self.chat_list_scroll.saturating_sub(1);
+            }
+            _ => {}
+        }
+        
+        Ok(false)
+    }
+    
     fn handle_message_scroll(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Down => {
@@ -260,6 +312,12 @@ impl App {
                 };
                 self.chat_list_state.select(Some(i));
                 
+                // Auto-adjust scroll to keep selection visible
+                let visible_height = self.chat_list_area.height.saturating_sub(2) as usize; // -2 for borders
+                if i >= self.chat_list_scroll + visible_height {
+                    self.chat_list_scroll = i.saturating_sub(visible_height - 1);
+                }
+                
                 // Clear input and reset scroll when changing chats
                 self.input_buffer.clear();
                 self.message_scroll = 0;
@@ -280,6 +338,11 @@ impl App {
                     None => 0,
                 };
                 self.chat_list_state.select(Some(i));
+                
+                // Auto-adjust scroll to keep selection visible
+                if i < self.chat_list_scroll {
+                    self.chat_list_scroll = i;
+                }
                 
                 // Clear input and reset scroll when changing chats
                 self.input_buffer.clear();
@@ -525,24 +588,40 @@ impl App {
     }
     
     fn render_chat_list(&mut self, frame: &mut Frame, area: Rect) {
-        let items: Vec<ListItem> = self.chats.iter().map(|chat| {
+        // Store the area for mouse click detection
+        self.chat_list_area = area;
+        
+        // Calculate visible range based on scroll offset
+        let visible_height = area.height.saturating_sub(2) as usize; // -2 for borders
+        let max_scroll = self.chats.len().saturating_sub(visible_height);
+        
+        // Clamp scroll to valid range
+        if self.chat_list_scroll > max_scroll {
+            self.chat_list_scroll = max_scroll;
+        }
+        
+        // Get visible slice of chats
+        let end_index = (self.chat_list_scroll + visible_height).min(self.chats.len());
+        let visible_chats = &self.chats[self.chat_list_scroll..end_index];
+        
+        let items: Vec<ListItem> = visible_chats.iter().map(|chat| {
             let name = &chat.name;
             let unread = if chat.unread_count > 0 {
                 format!(" ({})", chat.unread_count)
             } else {
                 String::new()
             };
-            
+
             let content = format!("{}{}", name, unread);
             ListItem::new(Line::from(content))
         }).collect();
-        
+
         let border_color = if self.focused == FocusedWidget::ChatList {
             self.theme.border_focused
         } else {
             self.theme.border
         };
-        
+
         let list = List::new(items)
             .block(Block::default()
                 .title(" Chats ")
@@ -553,8 +632,20 @@ impl App {
                 .bg(self.theme.primary)
                 .add_modifier(Modifier::BOLD))
             .highlight_symbol("► ");
-        
-        frame.render_stateful_widget(list, area, &mut self.chat_list_state);
+
+        // Adjust the selection for the visible window
+        let mut adjusted_state = self.chat_list_state.clone();
+        if let Some(selected) = self.chat_list_state.selected() {
+            // Convert absolute index to relative index within visible window
+            if selected >= self.chat_list_scroll && selected < end_index {
+                adjusted_state.select(Some(selected - self.chat_list_scroll));
+            } else {
+                // Selection is outside visible range, don't show highlight
+                adjusted_state.select(None);
+            }
+        }
+
+        frame.render_stateful_widget(list, area, &mut adjusted_state);
     }
     
     fn render_messages(&self, frame: &mut Frame, area: Rect) {
