@@ -29,6 +29,12 @@ enum FocusedWidget {
     Input,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChatListView {
+    Normal,    // Show non-archived chats + "Archived Messages"
+    Archived,  // Show archived chats only
+}
+
 pub struct App {
     theme: Theme,
     client: WhatsAppClient,
@@ -42,6 +48,7 @@ pub struct App {
     
     // UI State
     focused: FocusedWidget,
+    chat_list_view: ChatListView,
     chat_list_state: ListState,
     chat_list_scroll: usize,  // Scroll offset for chat list
     chat_list_area: Rect,  // Store chat list area for mouse click detection
@@ -66,6 +73,7 @@ impl App {
             current_chat_id: None,
             messages: HashMap::new(),
             focused: FocusedWidget::ChatList,
+            chat_list_view: ChatListView::Normal,
             chat_list_state: ListState::default(),
             chat_list_scroll: 0,
             chat_list_area: Rect::default(),
@@ -260,26 +268,54 @@ impl App {
                 // Check if click is within chat list area
                 let x = mouse.column;
                 let y = mouse.row;
-                
+
                 if x >= self.chat_list_area.x && x < self.chat_list_area.x + self.chat_list_area.width
                     && y >= self.chat_list_area.y && y < self.chat_list_area.y + self.chat_list_area.height
                 {
-                    // Calculate which chat was clicked
+                    // Calculate which item was clicked
                     // Subtract 1 for the border at the top
                     let relative_y = y.saturating_sub(self.chat_list_area.y + 1);
                     let clicked_index = self.chat_list_scroll + relative_y as usize;
-                    
-                    if clicked_index < self.chats.len() {
-                        // Select the clicked chat
-                        self.chat_list_state.select(Some(clicked_index));
+
+                    // First item (index 0) is always "Archived Messages" - clicking toggles view
+                    if clicked_index == 0 {
+                        // Toggle between Normal and Archived view
+                        self.chat_list_view = match self.chat_list_view {
+                            ChatListView::Normal => ChatListView::Archived,
+                            ChatListView::Archived => ChatListView::Normal,
+                        };
+                        self.chat_list_scroll = 0;
+                        self.chat_list_state.select(Some(0));
                         self.focused = FocusedWidget::ChatList;
-                        
-                        // Clear input and reset message scroll
-                        self.input_buffer.clear();
-                        self.message_scroll = 0;
-                        
-                        // Load messages for the clicked chat
-                        self.load_chat_messages_background(clicked_index).await?;
+                        return Ok(false);
+                    }
+
+                    // Get filtered chats for the current view
+                    let filtered_chats: Vec<_> = match self.chat_list_view {
+                        ChatListView::Normal => self.chats.iter().filter(|c| !c.archived).collect(),
+                        ChatListView::Archived => self.chats.iter().filter(|c| c.archived).collect(),
+                    };
+
+                    // Calculate actual chat index (subtract 1 for "Archived Messages" offset)
+                    let actual_chat_index = clicked_index.saturating_sub(1);
+
+                    // Find the chat in the full chats list
+                    if let Some(clicked_chat) = filtered_chats.get(actual_chat_index) {
+                        let chat_id = clicked_chat.id.clone();
+
+                        // Find this chat's absolute index in self.chats
+                        if let Some(abs_index) = self.chats.iter().position(|c| c.id == chat_id) {
+                            // Select the clicked chat
+                            self.chat_list_state.select(Some(clicked_index));
+                            self.focused = FocusedWidget::ChatList;
+
+                            // Clear input and reset message scroll
+                            self.input_buffer.clear();
+                            self.message_scroll = 0;
+
+                            // Load messages for the clicked chat
+                            self.load_chat_messages_background(abs_index).await?;
+                        }
                     }
                 }
             }
@@ -609,18 +645,36 @@ impl App {
         // Store the area for mouse click detection
         self.chat_list_area = area;
 
+        // Filter chats based on current view
+        let filtered_chats: Vec<&Chat> = match self.chat_list_view {
+            ChatListView::Normal => {
+                // Show non-archived chats
+                self.chats.iter()
+                    .filter(|c| !c.archived)
+                    .collect()
+            },
+            ChatListView::Archived => {
+                // Show only archived chats
+                self.chats.iter()
+                    .filter(|c| c.archived)
+                    .collect()
+            }
+        };
+
+        // Calculate total items (chats + "Archived Messages")
+        let total_items = filtered_chats.len() + 1;
+
         // Calculate visible range based on scroll offset
         let visible_height = area.height.saturating_sub(2) as usize; // -2 for borders
-        let max_scroll = self.chats.len().saturating_sub(visible_height);
+        let max_scroll = total_items.saturating_sub(visible_height);
 
         // Clamp scroll to valid range
         if self.chat_list_scroll > max_scroll {
             self.chat_list_scroll = max_scroll;
         }
 
-        // Get visible slice of chats
-        let end_index = (self.chat_list_scroll + visible_height).min(self.chats.len());
-        let visible_chats = &self.chats[self.chat_list_scroll..end_index];
+        // Get visible range
+        let end_index = (self.chat_list_scroll + visible_height).min(total_items);
 
         // Determine which item is selected in the visible window
         let selected_in_window = if let Some(selected) = self.chat_list_state.selected() {
@@ -633,28 +687,68 @@ impl App {
             None
         };
 
-        let items: Vec<ListItem> = visible_chats.iter().enumerate().map(|(idx, chat)| {
-            let name = &chat.name;
-            let unread = if chat.unread_count > 0 {
-                format!(" ({})", chat.unread_count)
-            } else {
-                String::new()
-            };
+        // Build items to display
+        let mut items: Vec<ListItem> = Vec::new();
 
-            // Apply highlight style only to the text if this item is selected
-            let is_selected = selected_in_window == Some(idx);
-            let text_style = if is_selected {
-                Style::default()
-                    .bg(self.theme.primary)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
+        for i in self.chat_list_scroll..end_index {
+            // First item is always "Archived Messages"
+            if i == 0 {
+                let is_selected = selected_in_window == Some(items.len());
+                let text_style = if is_selected {
+                    Style::default()
+                        .bg(self.theme.primary)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
 
-            let content = format!("{}{}", name, unread);
-            let line = Line::from(Span::styled(content, text_style));
-            ListItem::new(line)
-        }).collect();
+                // Check if there are any archived chats
+                let archived_count = self.chats.iter().filter(|c| c.archived).count();
+                
+                // Change indicator based on current view
+                let content = if self.chat_list_view == ChatListView::Archived {
+                    if archived_count > 0 {
+                        format!("📂 Archived Messages ({}) - Viewing", archived_count)
+                    } else {
+                        "📂 Archived Messages - Viewing (empty)".to_string()
+                    }
+                } else {
+                    if archived_count > 0 {
+                        format!("📁 Archived Messages ({})", archived_count)
+                    } else {
+                        "📁 Archived Messages".to_string()
+                    }
+                };
+
+                let line = Line::from(Span::styled(content, text_style));
+                items.push(ListItem::new(line));
+            } else {
+                // Regular chat item
+                let chat_idx = i - 1;  // Subtract 1 for "Archived Messages" offset
+                
+                if let Some(chat) = filtered_chats.get(chat_idx) {
+                    let name = &chat.name;
+                    let unread = if chat.unread_count > 0 {
+                        format!(" ({})", chat.unread_count)
+                    } else {
+                        String::new()
+                    };
+
+                    let is_selected = selected_in_window == Some(items.len());
+                    let text_style = if is_selected {
+                        Style::default()
+                            .bg(self.theme.primary)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+
+                    let content = format!("{}{}", name, unread);
+                    let line = Line::from(Span::styled(content, text_style));
+                    items.push(ListItem::new(line));
+                }
+            }
+        }
 
         let border_color = if self.focused == FocusedWidget::ChatList {
             self.theme.border_focused
@@ -662,6 +756,7 @@ impl App {
             self.theme.border
         };
 
+        // Always use "Chats" title
         let list = List::new(items)
             .block(Block::default()
                 .title(" Chats ")
@@ -670,7 +765,7 @@ impl App {
                 .border_style(Style::default().fg(border_color)))
             .highlight_symbol("► ");
 
-        // Use a state with no selection since we're manually handling highlighting
+        // Use a state with the selection
         let mut display_state = ListState::default();
         display_state.select(selected_in_window);
 
