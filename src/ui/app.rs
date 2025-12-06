@@ -142,12 +142,12 @@ impl App {
             
             WhatsAppEvent::MessageReceived(msg) => {
                 log::debug!("Received message in chat {}", msg.chat_id);
-                
+
                 // Add to messages
                 self.messages.entry(msg.chat_id.clone())
                     .or_insert_with(Vec::new)
                     .push(msg.clone());
-                
+
                 // Update chat's last message and timestamp
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.id == msg.chat_id) {
                     chat.last_message = Some(msg.body.clone());
@@ -157,17 +157,47 @@ impl App {
                     }
                 }
 
+                // Get the currently selected chat ID (if any) before re-sorting
+                // Need to account for "Archived Messages" offset (index 0) and view filtering
+                let selected_chat_id = if let Some(visual_index) = self.chat_list_state.selected() {
+                    if visual_index == 0 {
+                        // "Archived Messages" is selected, keep it selected
+                        None
+                    } else {
+                        // Get the filtered chats for current view
+                        let filtered_chats: Vec<&Chat> = match self.chat_list_view {
+                            ChatListView::Normal => self.chats.iter().filter(|c| !c.archived).collect(),
+                            ChatListView::Archived => self.chats.iter().filter(|c| c.archived).collect(),
+                        };
+
+                        // Visual index 1+ maps to filtered_chats index 0+
+                        let filtered_index = visual_index.saturating_sub(1);
+                        filtered_chats.get(filtered_index).map(|c| c.id.clone())
+                    }
+                } else {
+                    None
+                };
+
                 // Re-sort chats to bring the updated chat to the top
                 self.chats.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
-                // Preserve selection by finding the currently selected chat's new position
-                if let Some(current_index) = self.chat_list_state.selected() {
-                    if let Some(current_chat) = self.chats.get(current_index).map(|c| c.id.clone()) {
-                        // Find where this chat moved to after sorting
-                        if let Some(new_index) = self.chats.iter().position(|c| c.id == current_chat) {
-                            self.chat_list_state.select(Some(new_index));
-                        }
+                // Restore selection to the same chat (by ID)
+                if let Some(chat_id) = selected_chat_id {
+                    // Get filtered chats after re-sorting
+                    let filtered_chats: Vec<&Chat> = match self.chat_list_view {
+                        ChatListView::Normal => self.chats.iter().filter(|c| !c.archived).collect(),
+                        ChatListView::Archived => self.chats.iter().filter(|c| c.archived).collect(),
+                    };
+
+                    // Find the chat's new position in the filtered list
+                    if let Some(filtered_index) = filtered_chats.iter().position(|c| c.id == chat_id) {
+                        // Convert to visual index (add 1 for "Archived Messages" offset)
+                        let new_visual_index = filtered_index + 1;
+                        self.chat_list_state.select(Some(new_visual_index));
                     }
+                } else if self.chat_list_state.selected() == Some(0) {
+                    // Keep "Archived Messages" selected
+                    self.chat_list_state.select(Some(0));
                 }
             }
             
