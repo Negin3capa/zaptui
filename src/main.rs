@@ -51,6 +51,11 @@ async fn main() -> Result<()> {
     // Run app
     let result = run_app(&mut terminal, config).await;
 
+    // Flush pending input events before cleanup to avoid escape codes leaking to terminal
+    while event::poll(std::time::Duration::from_millis(0))? {
+        let _ = event::read()?;
+    }
+
     // Cleanup terminal
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), DisableMouseCapture, LeaveAlternateScreen)?;

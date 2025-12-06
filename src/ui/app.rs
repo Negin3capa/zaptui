@@ -590,21 +590,32 @@ impl App {
     fn render_chat_list(&mut self, frame: &mut Frame, area: Rect) {
         // Store the area for mouse click detection
         self.chat_list_area = area;
-        
+
         // Calculate visible range based on scroll offset
         let visible_height = area.height.saturating_sub(2) as usize; // -2 for borders
         let max_scroll = self.chats.len().saturating_sub(visible_height);
-        
+
         // Clamp scroll to valid range
         if self.chat_list_scroll > max_scroll {
             self.chat_list_scroll = max_scroll;
         }
-        
+
         // Get visible slice of chats
         let end_index = (self.chat_list_scroll + visible_height).min(self.chats.len());
         let visible_chats = &self.chats[self.chat_list_scroll..end_index];
-        
-        let items: Vec<ListItem> = visible_chats.iter().map(|chat| {
+
+        // Determine which item is selected in the visible window
+        let selected_in_window = if let Some(selected) = self.chat_list_state.selected() {
+            if selected >= self.chat_list_scroll && selected < end_index {
+                Some(selected - self.chat_list_scroll)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let items: Vec<ListItem> = visible_chats.iter().enumerate().map(|(idx, chat)| {
             let name = &chat.name;
             let unread = if chat.unread_count > 0 {
                 format!(" ({})", chat.unread_count)
@@ -612,8 +623,19 @@ impl App {
                 String::new()
             };
 
+            // Apply highlight style only to the text if this item is selected
+            let is_selected = selected_in_window == Some(idx);
+            let text_style = if is_selected {
+                Style::default()
+                    .bg(self.theme.primary)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+
             let content = format!("{}{}", name, unread);
-            ListItem::new(Line::from(content))
+            let line = Line::from(Span::styled(content, text_style));
+            ListItem::new(line)
         }).collect();
 
         let border_color = if self.focused == FocusedWidget::ChatList {
@@ -628,24 +650,13 @@ impl App {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color)))
-            .highlight_style(Style::default()
-                .bg(self.theme.primary)
-                .add_modifier(Modifier::BOLD))
             .highlight_symbol("► ");
 
-        // Adjust the selection for the visible window
-        let mut adjusted_state = self.chat_list_state.clone();
-        if let Some(selected) = self.chat_list_state.selected() {
-            // Convert absolute index to relative index within visible window
-            if selected >= self.chat_list_scroll && selected < end_index {
-                adjusted_state.select(Some(selected - self.chat_list_scroll));
-            } else {
-                // Selection is outside visible range, don't show highlight
-                adjusted_state.select(None);
-            }
-        }
+        // Use a state with no selection since we're manually handling highlighting
+        let mut display_state = ListState::default();
+        display_state.select(selected_in_window);
 
-        frame.render_stateful_widget(list, area, &mut adjusted_state);
+        frame.render_stateful_widget(list, area, &mut display_state);
     }
     
     fn render_messages(&self, frame: &mut Frame, area: Rect) {
