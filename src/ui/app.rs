@@ -3,8 +3,8 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, MouseEvent, Mouse
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, BorderType, List, ListItem, ListState, Paragraph},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, BorderType, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 use std::collections::HashMap;
@@ -858,47 +858,52 @@ impl App {
         };
         
         let messages_text = if let Some(chat_id) = &self.current_chat_id {
-            if let Some(messages) = self.messages.get(chat_id) {
-                let lines: Vec<Line> = messages.iter().map(|msg| {
-                    let sender = if msg.from_me {
-                        Span::styled("Me", Style::default().fg(self.theme.me))
-                    } else {
-                        Span::styled(
-                            msg.sender.as_deref().unwrap_or("User"),
-                            Style::default().fg(self.theme.other)
-                        )
-                    };
-                    
-                    let time = chrono::DateTime::from_timestamp(msg.timestamp, 0)
-                        .map(|dt| dt.format("%H:%M").to_string())
-                        .unwrap_or_default();
-                    
-                    let body = if msg.has_media {
-                        format!("[Media: {}]", msg.media_type.as_deref().unwrap_or("unknown"))
-                    } else {
-                        msg.body.clone()
-                    };
-                    
-                    Line::from(vec![
-                        Span::styled(time, Style::default().fg(self.theme.system)),
-                        Span::raw(" "),
-                        sender,
-                        Span::raw(": "),
-                        Span::raw(body),
-                    ])
-                }).collect();
-                
-                lines
-            } else {
-                vec![Line::from("Loading messages...")]
+        if let Some(messages) = self.messages.get(chat_id) {
+            let mut text = Text::default();
+
+            for msg in messages {
+                let sender = if msg.from_me {
+                    Span::styled("Me", Style::default().fg(self.theme.me))
+                } else {
+                    Span::styled(
+                        msg.sender.as_deref().unwrap_or("User"),
+                        Style::default().fg(self.theme.other)
+                    )
+                };
+
+                let time = chrono::DateTime::from_timestamp(msg.timestamp, 0)
+                    .map(|dt| dt.format("%H:%M").to_string())
+                    .unwrap_or_default();
+
+                let body = if msg.has_media {
+                    format!("[Media: {}]", msg.media_type.as_deref().unwrap_or("unknown"))
+                } else {
+                    msg.body.clone()
+                };
+
+                // Create a single line with all components - Paragraph will wrap it
+                let message_line = Line::from(vec![
+                    Span::styled(time, Style::default().fg(self.theme.system)),
+                    Span::raw(" "),
+                    sender,
+                    Span::raw(": "),
+                    Span::raw(body),
+                ]);
+
+                text.lines.push(message_line);
             }
+
+            text
         } else {
-            vec![Line::from("Select a chat to view messages")]
-        };
-        
-        // Calculate scroll offset
-        let num_lines = messages_text.len();
-        let available_height = area.height.saturating_sub(2) as usize;
+            Text::from("Loading messages...")
+        }
+    } else {
+        Text::from("Select a chat to view messages")
+    };
+    
+    // Calculate scroll offset
+    let num_lines = messages_text.lines.len();
+    let available_height = area.height.saturating_sub(2) as usize;
         
         // Calculate max scroll to prevent scrolling beyond content
         let max_scroll = num_lines.saturating_sub(available_height);
@@ -930,6 +935,7 @@ impl App {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color)))
+            .wrap(Wrap { trim: false })
             .scroll((scroll_offset, 0));
         
         frame.render_widget(paragraph, area);
