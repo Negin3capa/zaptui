@@ -37,24 +37,29 @@ if [ ! -d "./whatsapp-service/node_modules" ]; then
     cd ..
 fi
 
-# Check port 8080
+# Check if service is already running
+SERVICE_ALREADY_RUNNING=false
+# Use lsof to check if port 8080 is listened by node process
 if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
-    echo "❌ Error: Port 8080 is already in use"
-    echo "To fix, run: sudo lsof -ti:8080 | xargs kill -9"
-    exit 1
+    echo "✅ WhatsApp service already running (shared)"
+    SERVICE_ALREADY_RUNNING=true
 fi
 
 # Cleanup function
 cleanup() {
     echo ""
-    echo "🛑 Stopping WhatsApp service..."
-    if [ ! -z "$WA_PID" ]; then
-        kill $WA_PID 2>/dev/null || true
-    fi
-    pkill -f "node.*server.js" 2>/dev/null || true
-    sleep 0.5
-    if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
-        lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+    if [ "$SERVICE_ALREADY_RUNNING" = false ]; then
+        echo "🛑 Stopping WhatsApp service..."
+        if [ ! -z "$WA_PID" ]; then
+            kill $WA_PID 2>/dev/null || true
+        fi
+        pkill -f "node.*server.js" 2>/dev/null || true
+        sleep 0.5
+        if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
+            lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+        fi
+    else
+        echo "ℹ️  Leaving shared service running for other instances"
     fi
     echo "✅ Goodbye!"
     exit 0
@@ -62,18 +67,24 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM EXIT
 
-# Start WhatsApp Service
-echo "🔌 Starting WhatsApp service..."
-cd whatsapp-service
-node server.js > /dev/null 2>&1 &
-WA_PID=$!
-cd ..
+# Start WhatsApp Service if not already running
+if [ "$SERVICE_ALREADY_RUNNING" = false ]; then
+    echo "🔌 Starting WhatsApp service..."
+    cd whatsapp-service
+    node server.js > /dev/null 2>&1 &
+    WA_PID=$!
+    cd ..
 
-# Wait for service
-sleep 2
-if ! kill -0 $WA_PID 2>/dev/null; then
-    echo "❌ Failed to start WhatsApp service"
-    exit 1
+    # Wait for service
+    sleep 2
+    if ! kill -0 $WA_PID 2>/dev/null; then
+        echo "❌ Failed to start WhatsApp service"
+        exit 1
+    fi
+
+    echo "✅ Connected. launching TUI..."
+else
+    echo "🚀 Launching TUI..."
 fi
 
 echo "✅ Connected. launching TUI..."
