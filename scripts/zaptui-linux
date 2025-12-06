@@ -8,18 +8,7 @@ set -e
 # Installation paths
 INSTALL_DIR="$HOME/.local/share/zaptui"
 SERVICE_DIR="$INSTALL_DIR/whatsapp-service"
-AUTH_DIR="$INSTALL_DIR/.wwebjs_auth"
 BINARY="$INSTALL_DIR/zaptui-bin"
-
-# Handle info flags directly without starting service
-if [[ "$1" == "--version" ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]] || [[ "$1" == "-V" ]]; then
-    if [ -f "$BINARY" ]; then
-        exec "$BINARY" "$@"
-    else
-        echo "❌ ZapTUI not properly installed. Run './install.sh' from the project directory."
-        exit 1
-    fi
-fi
 
 # Check if installation exists
 if [ ! -d "$INSTALL_DIR" ]; then
@@ -28,10 +17,17 @@ if [ ! -d "$INSTALL_DIR" ]; then
     exit 1
 fi
 
+# Check if binary exists
 if [ ! -f "$BINARY" ]; then
     echo "❌ ZapTUI binary not found at $BINARY"
     echo "Run './install.sh' from the project directory to reinstall."
     exit 1
+fi
+
+# Handle info flags directly without starting service
+if [[ "$1" == "--version" ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]] || [[ "$1" == "-V" ]]; then
+    "$BINARY" "$@"
+    exit 0
 fi
 
 echo "🚀 ZapTUI - Starting..."
@@ -53,12 +49,13 @@ fi
 
 # Check if service is already running
 SERVICE_ALREADY_RUNNING=false
-if lsof -Pi :8080 -sTCP:LISTEN -t > /dev/null 2>&1 ; then
+# Use lsof to check if port 8080 is listened by node process
+if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
     echo "✅ WhatsApp service already running (shared)"
     SERVICE_ALREADY_RUNNING=true
 fi
 
-# Cleanup function (only cleanup service if we started it)
+# Cleanup function
 cleanup() {
     echo ""
     if [ "$SERVICE_ALREADY_RUNNING" = false ]; then
@@ -68,7 +65,7 @@ cleanup() {
         fi
         pkill -f "node.*server.js" 2>/dev/null || true
         sleep 0.5
-        if lsof -Pi :8080 -sTCP:LISTEN -t > /dev/null 2>&1; then
+        if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
             lsof -ti:8080 | xargs kill -9 2>/dev/null || true
         fi
     else
@@ -83,32 +80,26 @@ trap cleanup SIGINT SIGTERM EXIT
 # Start WhatsApp Service if not already running
 if [ "$SERVICE_ALREADY_RUNNING" = false ]; then
     echo "🔌 Starting WhatsApp service..."
-    
-    # Set auth path via environment variable
-    export ZAPTUI_AUTH_PATH="$AUTH_DIR"
-    
     cd "$SERVICE_DIR"
     node server.js > /dev/null 2>&1 &
     WA_PID=$!
     cd - > /dev/null
-    
-    # Wait for service to start
+
+    # Wait for service
     sleep 2
     if ! kill -0 $WA_PID 2>/dev/null; then
         echo "❌ Failed to start WhatsApp service"
         exit 1
     fi
-    
+
     echo "✅ Connected. launching TUI..."
 else
     echo "🚀 Launching TUI..."
 fi
 
+echo "✅ Connected. launching TUI..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Run TUI (don't use exec so cleanup trap can run)
+# Run TUI
 "$BINARY" "$@"
-
-# Exit with same code as binary
-exit $?
