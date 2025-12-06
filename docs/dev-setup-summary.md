@@ -163,7 +163,7 @@ npm install -g nodemon
 
 ---
 
-## 🎉 You're All Set!
+## 🎉 You're All Set
 
 You now have a professional development workflow with:
 

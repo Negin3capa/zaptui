@@ -137,7 +137,7 @@ service_url = "ws://localhost:8080"
 
 ### Linux & macOS
 
-**"Port 8080 is already in use"**
+#### "Port 8080 is already in use"
 
 Running `zaptui` again after a crash might show this. Run:
 
@@ -149,7 +149,7 @@ sudo lsof -ti:8080 | xargs kill -9
 lsof -ti:8080 | xargs kill -9
 ```
 
-**"Binary not found"**
+#### "Binary not found"
 
 Run the installer again:
 
@@ -158,7 +158,7 @@ Run the installer again:
 ./install-macos.sh   # macOS
 ```
 
-### Windows
+### Windows Troubleshooting
 
 **"Port 8080 is already in use"**
 
@@ -168,7 +168,7 @@ In PowerShell as Administrator:
 Get-NetTCPConnection -LocalPort 8080 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
 ```
 
-**"Running scripts is disabled"**
+#### "Running scripts is disabled"
 
 Enable PowerShell script execution:
 
@@ -176,7 +176,7 @@ Enable PowerShell script execution:
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-**"Binary not found"**
+#### "Binary not found"
 
 Run the installer again:
 
@@ -186,7 +186,7 @@ Run the installer again:
 
 ### All Platforms
 
-**Uninstall**
+#### Uninstall
 
 ```bash
 # Linux

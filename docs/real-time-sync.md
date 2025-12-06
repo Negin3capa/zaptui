@@ -60,7 +60,7 @@ A background task runs every **30 seconds** to refresh messages in the currently
 
 ### Event Flow
 
-```
+```text
 1. User receives message
    ↓
 2. WhatsApp service broadcasts MessageReceived event
@@ -77,7 +77,7 @@ A background task runs every **30 seconds** to refresh messages in the currently
 
 ### Periodic Sync Flow
 
-```
+```text
 Every 30 seconds:
    ↓
 1. Check if we have an active chat

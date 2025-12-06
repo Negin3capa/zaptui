@@ -2,21 +2,21 @@
 
 ## Before Implementation ❌
 
-### Chat List
+### Chat List (Before)
 
 - ❌ Chats loaded in random/server order
 - ❌ Order never changed after initial load
 - ❌ New messages didn't trigger re-sorting
 - ❌ No visual indication of chat activity
 
-### Messages
+### Messages (Before)
 
 - ✅ New messages appeared in real-time (via events)
 - ❌ No periodic sync to catch missed messages
 - ❌ Chat metadata (last message, timestamp) updated but not reflected in list order
 - ❌ Unread counts updated but chat stayed in same position
 
-### User Experience
+### User Experience (Before)
 
 - Confusing: Active chats buried in the list
 - Inconsistent: Had to manually scan for recent activity
@@ -25,21 +25,21 @@
 
 ## After Implementation ✅
 
-### Chat List
+### Chat List (After)
 
 - ✅ Chats sorted by most recent activity (WhatsApp-style)
 - ✅ Active chats automatically jump to the top
 - ✅ Real-time re-sorting on every new message
 - ✅ Visual organization matches user's mental model
 
-### Messages
+### Messages (After)
 
 - ✅ New messages appear instantly (real-time events)
 - ✅ Periodic 30-second sync catches anything missed
 - ✅ Chat metadata updates trigger list re-organization
 - ✅ Unread counts update AND chat moves to top
 
-### User Experience
+### User Experience (After)
 
 - Intuitive: Most active chats at the top
 - Familiar: Works exactly like WhatsApp Web/Desktop
@@ -107,14 +107,14 @@
 
 ## Performance Impact
 
-### Before
+### Performance Before
 
 - **Initial load:** Same
 - **Message receive:** Update cache only
 - **CPU usage:** Minimal
 - **Network:** Real-time events only
 
-### After
+### Performance After
 
 - **Initial load:** +0.01s (one-time sort)
 - **Message receive:** Update cache + resort list (~0.001s)

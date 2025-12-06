@@ -105,7 +105,7 @@ make dev-tmux
 
 ### Tmux Controls
 
-```
+```text
 Ctrl+B →  arrow     Switch panes
 Ctrl+B →  d         Detach (keeps running)
 Ctrl+B →  [         Scroll mode
