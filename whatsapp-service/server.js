@@ -88,6 +88,18 @@ class WhatsAppService {
       console.log("New client connected");
       this.clients.add(ws);
 
+      // Send initial state to new client
+      if (this.client) {
+        // If already ready/authenticated, tell the new client
+        if (this.client.info) {
+          console.log("Sending initial ready/auth state to new client");
+          ws.send(JSON.stringify({ event: "ready" }));
+          ws.send(JSON.stringify({ event: "authenticated" }));
+        }
+        // If unauthenticated, we don't need to do anything,
+        // the client will wait for QR event which comes from event listener
+      }
+
       ws.on("message", async (data) => {
         try {
           const request = JSON.parse(data);
@@ -150,9 +162,14 @@ class WhatsAppService {
   }
 
   async getChats() {
-    console.log("getChats called");
+    console.log("getChats called - starting chat sync...");
+    const startTime = Date.now();
+
     const chats = await this.client.getChats();
-    console.log(`Found ${chats.length} chats`);
+
+    const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`Found ${chats.length} chats (took ${elapsedSeconds}s)`);
+
     const serialized = chats.map((chat) => this.serializeChat(chat));
     console.log("Sample chat:", JSON.stringify(serialized[0], null, 2));
     return serialized;

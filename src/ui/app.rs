@@ -91,12 +91,12 @@ impl App {
                 log::info!("Ready");
                 self.state = AppState::Ready;
                 self.qr_code = None;
-                self.status_message = "Loading chats (this may take a minute)...".to_string();
-                
+                self.status_message = "Syncing chats... First sync after login can take 3-5 minutes with many contacts".to_string();
+
                 // Load chats in background to avoid blocking the event loop
                 let client = self.client.clone(); // WhatsAppClient is cheap to clone (Arc internal)
                 let event_tx = self.event_tx.clone();
-                
+
                 tokio::spawn(async move {
                     log::info!("Starting background chat load...");
                     match client.get_chats().await {
@@ -106,13 +106,18 @@ impl App {
                         }
                         Err(e) => {
                             log::error!("Failed to load chats: {}", e);
-                            // Verify functionality: for now just log, maybe add Error event later
+                            // Send error event to update UI
+                            let error_msg = format!("Failed to load chats: {}. Try restarting the app.", e);
+                            let _ = event_tx.send(WhatsAppEvent::Error(error_msg)).await;
                         }
                     }
                 });
             }
             
-            WhatsAppEvent::ChatsLoaded(chats) => {
+            WhatsAppEvent::ChatsLoaded(mut chats) => {
+                 // Sort chats by timestamp (most recent first)
+                 chats.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
                  self.chats = chats;
                  if !self.chats.is_empty() && self.chat_list_state.selected().is_none() {
                      self.chat_list_state.select(Some(0));
@@ -131,12 +136,25 @@ impl App {
                     .or_insert_with(Vec::new)
                     .push(msg.clone());
                 
-                // Update chat's last message
+                // Update chat's last message and timestamp
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.id == msg.chat_id) {
                     chat.last_message = Some(msg.body.clone());
                     chat.timestamp = msg.timestamp;
                     if !msg.from_me {
                         chat.unread_count += 1;
+                    }
+                }
+
+                // Re-sort chats to bring the updated chat to the top
+                self.chats.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+                // Preserve selection by finding the currently selected chat's new position
+                if let Some(current_index) = self.chat_list_state.selected() {
+                    if let Some(current_chat) = self.chats.get(current_index).map(|c| c.id.clone()) {
+                        // Find where this chat moved to after sorting
+                        if let Some(new_index) = self.chats.iter().position(|c| c.id == current_chat) {
+                            self.chat_list_state.select(Some(new_index));
+                        }
                     }
                 }
             }
@@ -153,6 +171,11 @@ impl App {
                 log::warn!("Disconnected from WhatsApp");
                 self.state = AppState::Disconnected;
                 self.status_message = "Disconnected. Reconnecting...".to_string();
+            }
+
+            WhatsAppEvent::Error(error_msg) => {
+                log::error!("Error event received: {}", error_msg);
+                self.status_message = format!("⚠️  {}", error_msg);
             }
         }
         
@@ -346,6 +369,31 @@ impl App {
             }
         }
         
+        Ok(())
+    }
+
+    /// Refresh messages for the current chat (useful for periodic sync)
+    pub async fn refresh_current_chat_messages(&mut self) -> Result<()> {
+        if let Some(chat_id) = &self.current_chat_id {
+            log::debug!("Refreshing messages for current chat: {}", chat_id);
+
+            match self.client.get_messages(chat_id, 50).await {
+                Ok(messages) => {
+                    let old_count = self.messages.get(chat_id).map(|m| m.len()).unwrap_or(0);
+                    let new_count = messages.len();
+
+                    self.messages.insert(chat_id.clone(), messages);
+
+                    if new_count > old_count {
+                        log::info!("Refreshed {} new messages", new_count - old_count);
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to refresh messages: {}", e);
+                }
+            }
+        }
+
         Ok(())
     }
     

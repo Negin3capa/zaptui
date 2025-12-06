@@ -25,6 +25,9 @@ pub enum WhatsAppEvent {
     // Internal events
     #[serde(skip)]
     ChatsLoaded(Vec<Chat>),
+
+    #[serde(skip)]
+    Error(String),
 }
 
 /// WhatsApp chat representation
