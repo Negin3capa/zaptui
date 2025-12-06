@@ -91,12 +91,12 @@ impl App {
                 log::info!("Ready");
                 self.state = AppState::Ready;
                 self.qr_code = None;
-                self.status_message = "Loading chats (this may take a minute)...".to_string();
-                
+                self.status_message = "Syncing chats... First sync after login can take 3-5 minutes with many contacts".to_string();
+
                 // Load chats in background to avoid blocking the event loop
                 let client = self.client.clone(); // WhatsAppClient is cheap to clone (Arc internal)
                 let event_tx = self.event_tx.clone();
-                
+
                 tokio::spawn(async move {
                     log::info!("Starting background chat load...");
                     match client.get_chats().await {
@@ -106,7 +106,9 @@ impl App {
                         }
                         Err(e) => {
                             log::error!("Failed to load chats: {}", e);
-                            // Verify functionality: for now just log, maybe add Error event later
+                            // Send error event to update UI
+                            let error_msg = format!("Failed to load chats: {}. Try restarting the app.", e);
+                            let _ = event_tx.send(WhatsAppEvent::Error(error_msg)).await;
                         }
                     }
                 });
@@ -153,6 +155,11 @@ impl App {
                 log::warn!("Disconnected from WhatsApp");
                 self.state = AppState::Disconnected;
                 self.status_message = "Disconnected. Reconnecting...".to_string();
+            }
+
+            WhatsAppEvent::Error(error_msg) => {
+                log::error!("Error event received: {}", error_msg);
+                self.status_message = format!("⚠️  {}", error_msg);
             }
         }
         

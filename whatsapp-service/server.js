@@ -150,9 +150,14 @@ class WhatsAppService {
   }
 
   async getChats() {
-    console.log("getChats called");
+    console.log("getChats called - starting chat sync...");
+    const startTime = Date.now();
+
     const chats = await this.client.getChats();
-    console.log(`Found ${chats.length} chats`);
+
+    const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`Found ${chats.length} chats (took ${elapsedSeconds}s)`);
+
     const serialized = chats.map((chat) => this.serializeChat(chat));
     console.log("Sample chat:", JSON.stringify(serialized[0], null, 2));
     return serialized;

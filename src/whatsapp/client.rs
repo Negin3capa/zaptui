@@ -137,7 +137,7 @@ impl WhatsAppClient {
     
     /// Get all chats (with longer timeout as this can be slow with many chats)
     pub async fn get_chats(&self) -> Result<Vec<Chat>> {
-        let result = self.request_with_timeout("getChats", json!({}), 120).await?;
+        let result = self.request_with_timeout("getChats", json!({}), 300).await?;
         
         // Log the actual JSON for debugging
         log::debug!("getChats result: {}", serde_json::to_string_pretty(&result).unwrap_or_else(|_| "<invalid json>".to_string()));
